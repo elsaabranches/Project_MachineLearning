@@ -1,0 +1,162 @@
+---
+title: "Project: Practical Machine Learning"
+author: "Elsa"
+date: "20 July 2015"
+output: html_document
+---
+
+This work was developed as the final project for the Practical Machine Learning Course - Coursera, from Johns Hopkins University (for more details visit https://www.coursera.org/course/predmachlearn).
+
+# Introduction
+(Note: In this section the info provided for the assignment is reproduced)
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it.
+
+## GOALS 
+In this project, the goals are to:
+
+1. Use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants, that were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+2. Predict the manner in which the participants did the exercise. This is the "classe" variable in the training set (any other variables may be used to predict with).
+
+3. Create a report describing how the model was built, how cross validation was used and what the expected out of sample error is, and why the different choices were made. 
+
+4. Use prediction model to predict 20 different test cases.
+
+## Data
+The TRAINING data for this project are available here: https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The TEST data are available here: https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+# Code and Results
+
+## Set working directory, load libraries and set seed
+Set working directory:
+```{r}
+setwd("/Volumes/BIG_backup/DATA_All/Science_stuff/COURSES/10-Data_Science_Specialization/08_PracticalMachineLearning/Quizzes/Project")
+```
+Load required libraries:
+```{r}
+library(AppliedPredictiveModeling)
+library(caret)
+library(randomForest)
+library(rpart)
+```
+Set seed for reproducibility
+```{r}
+set.seed(1111)
+```
+
+## Load Data
+Data was downloaded from the provided source (see Introduction section) to the working directory and was then loaded using the read.csv() function. The first column was not loaded since 
+```{r}
+training = read.csv("pml-training.csv")[-1]
+testing = read.csv("pml-testing.csv")[-1]
+```
+
+### Data checks and cleaning
+Data was initially checked using the function summary(). The code used is shown below, but the output was omited for simplicity.
+```{r, eval=FALSE}
+summary(training)
+summary(testing)
+```
+Analysis of the summary data reveals several variables where there is missing data. The table below shows that there are 100 columns/variables with missing data and 59 without.
+```{r}
+missingData = sapply(training, function (x) any(is.na(x) | x == ""))
+table(missingData)
+```
+Only the 59 complete variables will be kept (i.e. variables containing missing data will be removed):
+```{r}
+variables = names(subset(missingData, missingData == "FALSE"))
+training_clean = training[,variables]
+```
+The summary() and class() functions were then used to check that the predictor variable to use - "classe" - was a factor variable. 
+```{r}
+summary(training_clean$classe)
+```
+
+I next checked for the presence of variables that have almost no variability, using the nearZeroVar() function:
+```{r}
+nzv = nearZeroVar(training_clean, saveMetrics=TRUE)
+table(nzv$nzv)
+```
+This analysis identifies the variable "new_window" as having almost no variability, and, therefore, this variable was removed.
+```{r}
+drop <- c("new_window")
+training_clean = training_clean[,!names(training_clean) %in% drop]
+```
+Finally, I checked for variables related with data acquisition and that, therefore, are not suitable to be used in prediction. The identified variables were: user_name, raw_timestamp_part_1, raw_timestamp_part_2, cvtd_timestamp, and num_window. Since these are the first 5 variables, they were removed using the following code: 
+```{r}
+training_clean = training_clean[, -(1:5)]
+```
+So, the training_clean set has now 53 variables, including the predictor "classe", shown below:
+```{r}
+names(training_clean)
+```
+
+### Partioning training set
+In order to be able to do cross-validation, the cleaned training set was partioned into two subsets: trainingS (75%) and testingS (25%)
+```{r}
+subsetTraining <- createDataPartition(y=training_clean$classe, p=0.75, list=FALSE)
+trainingS <- training_clean[subsetTraining, ] 
+testingS <- training_clean[-subsetTraining, ]
+```
+
+
+## PREDICTION MODELS
+
+I will test two different prediction models - Decision Tree (DT) and Random Forest (RF) - and chose the most accurate to predict the 20 different test cases provided.
+
+### Model Specification
+
+#### Models
+```{r}
+modelDT = rpart(classe ~ ., data=trainingS, method="class")
+modelRF = randomForest(classe ~. , data=trainingS, method="class")
+```
+#### Predictions
+```{r}
+predictionDT = predict(modelDT, testingS, type = "class")
+predictionRF = predict(modelRF, testingS, type = "class")
+```
+#### Confusion Matrix (Model cross-validation)
+```{r}
+confMatrixDT = confusionMatrix(predictionDT, testingS$classe)
+confMatrixRF = confusionMatrix(predictionRF, testingS$classe)
+```
+Print accuracy values for both models:
+```{r}
+confMatrixDT[[3]]["Accuracy"]  
+confMatrixRF[[3]]["Accuracy"] 
+```
+
+#### Decision
+The Random Forest algorithm performed better than the Decision Trees (0.996 vs 0.740 accuracy, respectively); therefore, the Random Forest model was chosen.  
+
+For the chosen model, the expected out-of-sample error (= 1 - accuracy) is estimated at 0.004, or 0.4%. Since the test data set comprises only 20 cases, with the obtained accuracy of above 99% on the cross-validation data indicated that very few, or none, of the test samples should be missclassified.
+
+
+### Model predictions using the Random Forest model
+Finally, I predicted the outcome levels using the Random Forest algorithm and the provided TEST dataset.
+```{r}
+predictionRF_final = predict(modelRF, testing, type = "class")
+predictionRF_final
+```
+
+#### Generate files for submission
+```{r}
+pm_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+pm_files(predictionRF_final)
+```
+
+
+# Session Info
+```{r}
+sessionInfo()
+```
